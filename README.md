@@ -18,13 +18,13 @@ Below is an overview of the file structure and detailed explanations of both the
 
 ### Overview
 
-- Reads protein structures (*.pdb or *.cif) using Biotite (or a related library).
-- Extracts backbone atoms **N**, **CA**, **C** (and estimates **CB**).
-- Computes distances, dihedral angles, and planar angles between residues, forming a 6D representation.
-- Normalizes and merges these channels into a 3-channel image (RGB). Each pixel \((i,j)\) corresponds to backbone geometry between residue \(i\) and residue \(j\).
-- Saves the result as a PNG image. Also exports the protein sequence in a FASTA file.
-- Bins the resulting images according to the protein length (number of residues) to keep image sizes manageable.
-- Uses multiprocessing to parallelize processing and automatically deletes original *.pdb/*.cif after successful conversion.
+- **Reads protein structures** (*.pdb or *.cif) using Biotite (or a related library).
+- **Extracts backbone atoms** `N`, `CA`, `C` (and estimates `CB`).
+- **Computes distances, dihedral angles, and planar angles** between residues, forming a 6D representation.
+- **Normalizes and merges these channels** into a 3-channel image (RGB). Each pixel \((i, j)\) corresponds to backbone geometry between residue \(i\) and residue \(j\).
+- **Saves the result as a PNG image.** Also exports the protein sequence in a FASTA file.
+- **Bins the resulting images** according to the protein length (number of residues) to keep image sizes manageable.
+- **Uses multiprocessing** to parallelize processing and automatically deletes original *.pdb/*.cif files after successful conversion.
 
 ### Key Sections
 
@@ -38,40 +38,31 @@ Below is an overview of the file structure and detailed explanations of both the
 
 ##### 2.1 Coordinate and Geometry Extraction
 
-For each residue, we collect coordinates of the backbone atoms: **N**, **CA**, **C**, and we also estimate **CB**.
+For each residue, we collect coordinates of the backbone atoms: `N`, `CA`, `C`, and we also estimate `CB`.
 
-- **Approximating \(C_\beta\):**  
-  The script uses a geometric approach to approximate the position of \(C_\beta\) if it is not explicitly present. The approximate formula:
+- **Approximating \( C_\beta \):**  
+  The script uses a geometric approach to approximate the position of \( C_\beta \) if it is not explicitly present. The approximate formula is:
 
-  \[
-  C_\beta \approx -0.5827 \,\vec{a} \;+\; 0.5680 \,\vec{b} \;-\; 0.5407 \,\vec{c} \;+\; C_\alpha,
-  \]
+  $$
+  C_\beta \approx -0.5827\,\vec{a} \;+\; 0.5680\,\vec{b} \;-\; 0.5407\,\vec{c} \;+\; C_\alpha,
+  $$
 
   where
 
-  \[
+  $$
   \vec{b} = C_\alpha - N,\quad \vec{c} = C - C_\alpha,\quad \vec{a} = \vec{b} \times \vec{c}.
-  \]
+  $$
 
   This is a known approximation in structural biology for generating a placeholder side-chain direction.
 
 ##### 2.2 Distance and Angles
 
-Each pair of residues \((i,j)\) is described by:
+Each pair of residues \((i, j)\) is described by:
 
-- **Distance between \(C_{\beta_i}\) and \(C_{\beta_j}\):**
+- **Distance between \( C_{\beta_i} \) and \( C_{\beta_j} \):**
 
-  \[
-  d_{ij} = \|\,C_{\beta_j} \;-\; C_{\beta_i}\|\,. 
-  \]
+  $$
+  d_{ij} = \|\,C_{\beta_j} - C_{\beta_i}\|.
+  $$
 
-- **Dihedral angles \(\omega\) and \(\theta\)** using the standard 4-point dihedral formula (with vectors \(N, CA, C, C_\beta\)).  
-  If we define `get_dihedrals(a, b, c, d)`, then we compute:
-
-  \[
-  \begin{aligned}
-  b_0 &= -\,\bigl(b - a\bigr),\\
-  b_1 &= c - b,\quad \bigl(b_1 \leftarrow \tfrac{b_1}{\|b_1\|}\bigr),\\
-  b_2 &= d - c,\\
-  v &= b_0 - \bigl(b_0 \cdot b_1\bigr)\,b_1,\\
-  w &= b_2_
+- **Dihedral angles \(\omega\) and**
