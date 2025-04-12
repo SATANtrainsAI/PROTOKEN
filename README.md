@@ -1,293 +1,342 @@
-# Repository Overview
+\documentclass[11pt]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{lmodern}
+\usepackage{amsmath, amssymb}
+\usepackage{geometry}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage{hyperref}
+\usepackage{parskip}
+
+\geometry{margin=1in}
+
+\title{Repository Overview: Protein Structure to Image and Hierarchical VQ-VAE Training}
+\author{}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\section*{Repository Overview}
 
 This repository contains two major parts:
-
-1. **Protein Structure to Image**  
-   A Python script (`pdb_to_png_distogram.py`) for parsing protein structures (*.pdb or *.cif) and converting them into PNG “distogram” images (plus associated FASTA files). These images capture backbone distances and angular features.
-
-2. **Hierarchical VQ-VAE Training**  
-   A hierarchical VQ-VAE model implemented with PyTorch and Transformer blocks (`model.py`, `train.py`, and `dataloader.py`). This model is designed to learn quantized latent representations of the generated protein images.
+\begin{enumerate}[label=\arabic*.]
+  \item \textbf{Protein Structure to Image} \\
+    A Python script (\texttt{pdb\_to\_png\_distogram.py}) for parsing protein structures (\texttt{*.pdb} or \texttt{*.cif}) and converting them into PNG “distogram” images (plus associated FASTA files). These images capture backbone distances and angular features.
+    
+  \item \textbf{Hierarchical VQ-VAE Training} \\
+    A hierarchical VQ-VAE model implemented with PyTorch and Transformer blocks (\texttt{model.py}, \texttt{train.py}, and \texttt{dataloader.py}). This model is designed to learn quantized latent representations of the generated protein images.
+\end{enumerate}
 
 Below is an overview of the file structure and detailed explanations of both the implementation and the underlying mathematical concepts.
 
----
+\section{Protein Structure to Distogram Image}
 
-## 1. Protein Structure to Distogram Image
+\subsection*{File: \texttt{pdb\_to\_png\_distogram.py}}
 
-**File:** `pdb_to_png_distogram.py`
+\subsubsection*{Overview}
 
-### Overview
+\begin{itemize}
+  \item Reads protein structures (\texttt{*.pdb} or \texttt{*.cif}) using Biotite (or a related library).
+  \item Extracts backbone atoms \textbf{N}, \textbf{CA}, and \textbf{C} (and estimates \textbf{CB}).
+  \item Computes distances, dihedral angles, and planar angles between residues, forming a 6D representation.
+  \item Normalizes and merges these channels into a 3-channel image (RGB). Each pixel $(i,j)$ corresponds to the backbone geometry between residue $i$ and residue $j$.
+  \item Saves the result as a PNG image and also exports the protein sequence in a FASTA file.
+  \item Bins the resulting images according to the protein length (number of residues) to keep image sizes manageable.
+  \item Uses multiprocessing to parallelize processing and automatically deletes original \texttt{*.pdb} or \texttt{*.cif} files after successful conversion.
+\end{itemize}
 
-- **Reads protein structures** (*.pdb or *.cif) using Biotite (or a related library).
-- **Extracts backbone atoms** `N`, `CA`, `C` (and estimates `CB`).
-- **Computes distances, dihedral angles, and planar angles** between residues, forming a 6D representation.
-- **Normalizes and merges these channels** into a 3-channel image (RGB). Each pixel \((i, j)\) corresponds to backbone geometry between residue \(i\) and residue \(j\).
-- **Saves the result as a PNG image.** Also exports the protein sequence in a FASTA file.
-- **Bins the resulting images** according to the protein length (number of residues) to keep image sizes manageable.
-- **Uses multiprocessing** to parallelize processing and automatically deletes original *.pdb/*.cif files after successful conversion.
+\subsubsection*{Key Sections}
 
-### Key Sections
+\paragraph{Configuration \& Mappings}
+\begin{itemize}
+  \item A dictionary \texttt{non\_standard\_to\_standard} is used to map nonstandard residues to standard residue names.
+  \item Another dictionary \texttt{three\_to\_one\_letter} maps three-letter codes (e.g., \texttt{VAL}) to one-letter codes (e.g., \texttt{V}).
+  \item The code ensures multi-chain or multi-model structures are skipped to reduce complexity.
+\end{itemize}
 
-#### Configuration & Mappings
+\paragraph{Backbone Extraction \& 6D Representation}
 
-- A dictionary `non_standard_to_standard` is used to map nonstandard residues to standard residue names.
-- Another dictionary `three_to_one_letter` maps three-letter codes (e.g., `VAL`) to one-letter codes (e.g., `V`).
-- The code ensures multi-chain or multi-model structures are skipped to reduce complexity.
+\subparagraph{2.1 Coordinate and Geometry Extraction}
 
-#### Backbone Extraction & 6D Representation
+For each residue, we collect coordinates of the backbone atoms: \texttt{N}, \texttt{CA}, \texttt{C}, and we also estimate \texttt{CB}.
 
-##### 2.1 Coordinate and Geometry Extraction
+\textbf{Approximating \( C_\beta \):}\\[1ex]
+The script uses a geometric approach to approximate the position of \( C_\beta \) if it is not explicitly present. The approximate formula is
+\[
+C_\beta \approx -0.5827\,\vec{a} \;+\; 0.5680\,\vec{b} \;-\; 0.5407\,\vec{c} \;+\; C_\alpha,
+\]
+where
+\[
+\vec{b} = C_\alpha - N,\quad \vec{c} = C - C_\alpha,\quad \vec{a} = \vec{b} \times \vec{c}.
+\]
+This is a known approximation in structural biology for generating a placeholder side-chain direction.
 
-For each residue, we collect coordinates of the backbone atoms: `N`, `CA`, `C`, and we also estimate `CB`.
+\subparagraph{2.2 Distance and Angles}
 
-- **Approximating \( C_\beta \):**  
-  The script uses a geometric approach to approximate the position of \( C_\beta \) if it is not explicitly present. The approximate formula is:
+Each pair of residues $(i, j)$ is described by:
 
-  $$
-  C_\beta \approx -0.5827\,\vec{a} \;+\; 0.5680\,\vec{b} \;-\; 0.5407\,\vec{c} \;+\; C_\alpha,
-  $$
+\begin{itemize}
+  \item \textbf{Distance between \( C_{\beta_i} \) and \( C_{\beta_j} \):}
+    \[
+    d_{ij} = \|\,C_{\beta_j} - C_{\beta_i}\|.
+    \]
+  \item \textbf{Dihedral angles \(\omega\) and \(\theta\):}\\[1ex]
+    Using the standard 4-point dihedral formula (with vectors \(N\), \(CA\), \(C\), \(C_\beta\)). If we define \texttt{get\_dihedrals(a, b, c, d)}, then we compute:
+    \[
+    \begin{aligned}
+    b_0 &= -\,(b - a), \\
+    b_1 &= c - b,\quad \text{(normalized so that } b_1 \leftarrow \frac{b_1}{\|b_1\|}\text{)}, \\
+    b_2 &= d - c, \\
+    v &= b_0 - (b_0 \cdot b_1)\,b_1, \\
+    w &= b_2 - (b_2 \cdot b_1)\,b_1, \\
+    x &= v \cdot w, \\
+    y &= (b_1 \times v) \cdot w, \\
+    \text{dihedral} &= \arctan2\,(y,\,x).
+    \end{aligned}
+    \]
+  \item \textbf{Planar angle \(\phi\):}\\[1ex]
+    This angle is computed using three points \(\bigl(C_{\alpha_i},\; C_{\beta_i},\; C_{\beta_j}\bigr)\) to measure the angle \(\angle_{\,i_{Cb},\,i_{Ca},\,j_{Cb}}\).
+\end{itemize}
 
-  where
+These angles and distances are stored in separate 2D arrays of shape $(L, L)$ if the protein has $L$ residues. The script normalizes these values (e.g., dividing distances by a maximum range and scaling angles by $\pi$) and merges some channels to limit the final image shape.
 
-  $$
-  \vec{b} = C_\alpha - N,\quad \vec{c} = C - C_\alpha,\quad \vec{a} = \vec{b} \times \vec{c}.
-  $$
+\subsubsection*{Normalization \& Image Generation}
 
-  This is a known approximation in structural biology for generating a placeholder side-chain direction.
+\begin{itemize}
+  \item \textbf{Distances} are scaled to the range \([-1, 1]\) based on a maximum value \( d_{\max} \) (e.g., 80.0 \AA).
+  \item \textbf{Angles} are scaled or offset so that, for example, \(\omega \in [-\pi, \pi]\) becomes \(\omega/\pi\).
+  \item The channels are merged to form a \(3 \times L \times L\) array, which is saved as a PNG using the \texttt{PIL.Image} module.
+\end{itemize}
 
-##### 2.2 Distance and Angles
+\subsubsection*{FASTA Output}
 
-Each pair of residues \((i, j)\) is described by:
+For each structure, a corresponding FASTA file is generated to store the linear sequence of the protein for reference.
 
-- **Distance between \( C_{\beta_i} \) and \( C_{\beta_j} \):**
+\subsubsection*{Binning by Residue Count}
 
-  $$
-  d_{ij} = \|\,C_{\beta_j} - C_{\beta_i}\|.
-  $$
+\begin{itemize}
+  \item Proteins are grouped into directories such as \texttt{bin\_40\_64/} or \texttt{bin\_65\_128/} to limit the size of the 2D images.
+  \item For example, a 65-residue protein leads to a \(3 \times 65 \times 65\) image that is stored in \texttt{bin\_65\_128/}.
+\end{itemize}
 
-- **Dihedral angles \(\omega\) and \(\theta\):**  
-  Using the standard 4-point dihedral formula (with vectors \(N\), \(CA\), \(C\), \(C_\beta\)). If we define `get_dihedrals(a, b, c, d)`, then we compute:
+\subsubsection*{Parallel Processing \& Deletion}
 
-  $$
-  \begin{aligned}
-  b_0 &= -\,(b - a), \\
-  b_1 &= c - b, \quad \text{(normalized such that } b_1 \leftarrow \frac{b_1}{\|b_1\|}\text{)}, \\
-  b_2 &= d - c, \\
-  v &= b_0 - (b_0 \cdot b_1)\,b_1, \\
-  w &= b_2 - (b_2 \cdot b_1)\,b_1, \\
-  x &= v \cdot w, \\
-  y &= (b_1 \times v) \cdot w, \\
-  \text{dihedral} &= \arctan2\,(y,\, x).
-  \end{aligned}
-  $$
+\begin{itemize}
+  \item The script uses \texttt{multiprocessing.Pool} for parallelism.
+  \item After successfully generating the PNG and FASTA files, the original \texttt{*.pdb} or \texttt{*.cif} file is deleted to free up space.
+\end{itemize}
 
-- **Planar angle \(\phi\):**  
-  This is computed using three points \(\bigl(C_{\alpha_i},\; C_{\beta_i},\; C_{\beta_j}\bigr)\) to measure the angle \(\angle_{\,i_{Cb},\,i_{Ca},\,j_{Cb}}\).
+\section{Dataloader \& Infinite Streaming}
 
-These angles and distances are stored in separate 2D arrays of shape \((L, L)\) if the protein has \(L\) residues. The script normalizes them (e.g., dividing distances by a maximum range, scaling angles by \(\pi\)) and merges some channels to limit the final image shape.
+\subsection*{File: \texttt{dataloader.py}}
 
-#### Normalization & Image Generation
+\subsubsection*{Purpose}
 
-- **Distances** are scaled to \([-1, 1]\) based on a maximum \( d_{\max} \) (e.g., 80.0 Å).
-- **Angles** are scaled or offset so that, for example, \(\omega \in [-\pi, \pi]\) becomes \(\omega/\pi\), etc.
-- The channels are merged to form a \(3 \times L \times L\) array, which is then saved as a PNG using `PIL.Image`.
+\begin{itemize}
+  \item Provides \textbf{Iterable Datasets} that stream large volumes of images without loading them all at once.
+  \item Uses chunked or streaming shuffling to feed data in random order.
+  \item Handles train/validation splits in a \textbf{deterministic} way based on the MD5 hash of the file path.
+  \item Supports multi-processing and Distributed Data Parallel (DDP) to shard data among workers and ranks.
+\end{itemize}
 
-#### FASTA Output
+\subsubsection*{Key Mechanics}
 
-- For each structure, a corresponding FASTA file is generated to store the linear sequence of the protein for reference.
+\paragraph{IterableImageDataset}
+\begin{itemize}
+  \item Walks through a single ``bin'' folder of PNG images.
+  \item Maintains a shuffle buffer to randomize the order.
+  \item Applies standard PyTorch transforms (e.g., \texttt{T.ToTensor()}, normalization).
+  \item Partitions data into ``train'' or ``val'' subsets by hashing each filename and comparing the hash value against a specified \texttt{valid\_frac}.
+\end{itemize}
 
-#### Binning by Residue Count
+\paragraph{IterableImageDatasetUni}
+\begin{itemize}
+  \item Similar to \texttt{IterableImageDataset} but loops over multiple bin folders (e.g., \texttt{bin\_40\_64/}, \texttt{bin\_65\_128/}, etc.).
+  \item Optionally skips certain bins if desired.
+\end{itemize}
 
-- Proteins are grouped into directories such as `bin_40_64/` or `bin_65_128/` to limit the size of the 2D images.
-- For example, a 65-residue protein leads to a \(3 \times 65 \times 65\) image, stored in `bin_65_128/`.
+\paragraph{Batch Collation \& Padding}
+\begin{itemize}
+  \item The function \texttt{collate\_with\_padding} ensures each batch is zero-padded to a dimension that is a multiple of a defined \texttt{patch\_size} so that the subsequent model can operate on uniformly sized inputs.
+  \item This is especially important when training Transformers that assume consistent input dimensions.
+\end{itemize}
 
-#### Parallel Processing & Deletion
+\paragraph{Infinite Loader}
+\begin{itemize}
+  \item The function \texttt{cycle(dl)} yields data from a DataLoader in an endless loop.
+  \item This mechanism is useful for large-scale or indefinite training cycles.
+\end{itemize}
 
-- The script uses `multiprocessing.Pool` for parallelism.
-- After successfully generating the PNG and FASTA, the original *.pdb/*.cif file is deleted to free space.
+\section{Hierarchical VQ-VAE \& Transformer Blocks}
 
----
+\subsection*{Files:}
+\begin{itemize}
+  \item \texttt{model.py} --- Contains the core hierarchical VQ-VAE, Transformer blocks, quantization modules, etc.
+  \item \texttt{train.py} --- The training script orchestrating gradient updates, logging, checkpointing, and other training logistics.
+\end{itemize}
 
-## 2. Dataloader & Infinite Streaming
+\subsection{Transformer Blocks \& Rotary Embedding}
 
-**File:** `dataloader.py`
+\subsubsection*{Multi-Head Attention with Rotary Embedding}
 
-### Purpose
+\begin{itemize}
+  \item The code uses standard multi-head self-attention, partitioning the embedding dimension \texttt{n\_embd} into \texttt{n\_head} heads.
+  \item \textbf{Queries} \( Q \), \textbf{Keys} \( K \), and \textbf{Values} \( V \) each have a dimension given by
+    \[
+    \text{latent\_dim} = n_{\text{head}} \times \left(\frac{\text{latent\_dim}}{n_{\text{head}}}\right).
+    \]
+  \item The attention scores are computed as:
+    \[
+    \text{Attention}(Q, K, V) = \text{softmax}\!\Biggl(\frac{Q\,K^\top}{\sqrt{d_{\text{head}}}}\Biggr)V,
+    \]
+    where
+    \[
+    d_{\text{head}} = \frac{\text{latent\_dim}}{n_{\text{head}}}.
+    \]
+  \item \textbf{Rotary Embedding:} \\
+    The module \texttt{rotary\_embedding\_torch} is used to incorporate relative positional information by rotating the \( Q \) and \( K \) vectors in a manner that depends on position indices. This provides a more continuous version of positional encoding capable of handling 2D sequences elegantly.
+\end{itemize}
 
-- Provides **Iterable Datasets** that stream large volumes of images without loading them all at once.
-- Uses chunked or streaming shuffling to feed data in random order.
-- Handles train/validation splits in a **deterministic** way based on the MD5 hash of the file path.
-- Supports multi-processing and Distributed Data Parallel (DDP) to shard data among workers and ranks.
+\subsubsection*{MLP Feedforward}
 
-### Key Mechanics
+\begin{itemize}
+  \item A two-layer feedforward block with hidden dimension \texttt{mlp\_hidden\_dim} (typically \(2 \times n_{\text{embd}}\)), utilizing a GELU activation function.
+\end{itemize}
 
-#### IterableImageDataset
+\subsubsection*{Residual \& LayerNorm}
 
-- **Walks through a single “bin” folder** of PNGs.
-- Maintains a shuffle buffer to randomize the order.
-- Applies standard PyTorch transforms (e.g., `T.ToTensor()`, normalization).
-- Partitions data into “train” or “val” subsets by hashing each filename and comparing against a given `valid_frac`.
+\begin{itemize}
+  \item Standard Transformer architecture with two residual connections per block:
+    \begin{itemize}
+      \item One residual branch around the multi-head self-attention sub-layer.
+      \item One residual branch around the MLP sub-layer.
+    \end{itemize}
+  \item Each residual branch is preceded by Layer Normalization.
+\end{itemize}
 
-#### IterableImageDatasetUni
-
-- Similar to the above, but loops over multiple bin folders (e.g., `bin_40_64/`, `bin_65_128/`, etc.).
-- Optionally skips certain bins if desired.
-
-#### Batch Collation & Padding
-
-- The function `collate_with_padding` ensures that each batch is zero-padded to a dimension that is a multiple of a specified `patch_size`, so that the subsequent model can operate on uniformly sized inputs.
-- This is crucial when training Transformers that assume consistent input dimensions.
-
-#### Infinite Loader
-
-- The function `cycle(dl)` yields data from a DataLoader in an endless loop.
-- This is useful for large-scale or indefinite training cycles.
-
----
-
-## 3. Hierarchical VQ-VAE & Transformer Blocks
-
-**Files:**
-
-- **`model.py`** – Contains the core hierarchical VQ-VAE, Transformer blocks, quantization modules, etc.
-- **`train.py`** – The training script that orchestrates gradient updates, logging, checkpointing, and other training logistics.
-
-### 3.1. Transformer Blocks & Rotary Embedding
-
-#### Multi-Head Attention with Rotary Embedding
-
-- The code uses standard multi-head self-attention, partitioning the embedding dimension `n_embd` into `n_head` heads.
-- **Queries \( Q \), Keys \( K \), and Values \( V \)** each have a dimension given by
-
-  $$
-  \text{latent\_dim} = n_{\text{head}} \times \left(\frac{\text{latent\_dim}}{n_{\text{head}}}\right).
-  $$
-
-- The attention scores are computed as:
-
-  $$
-  \text{Attention}(Q, K, V) = \text{softmax}\!\Bigl(\frac{Q\,K^\top}{\sqrt{d_{\text{head}}}}\Bigr)V,
-  $$
-
-  where
-
-  $$
-  d_{\text{head}} = \frac{\text{latent\_dim}}{n_{\text{head}}}.
-  $$
-
-- **Rotary Embedding:**  
-  The module `rotary_embedding_torch` is used to incorporate relative positional information by rotating the \( Q/K \) vectors depending on position indices. This is a more continuous version of positional encoding that can elegantly handle 2D sequences.
-
-#### MLP Feedforward
-
-- A two-layer feedforward block with a hidden dimension `mlp_hidden_dim` (typically \(2 \times n_{\text{embd}}\)), using a GELU activation.
-
-#### Residual + LayerNorm
-
-- Standard Transformer architecture: each block has two residual connections (one around the multi-head self-attention, one around the MLP), each preceded by Layer Normalization.
-
-### 3.2. Vision Transformer Encoders / Decoders
+\subsection{Vision Transformer Encoders / Decoders}
 
 Rather than splitting images into fixed-size patches (as in a traditional Vision Transformer), the code uses convolution-based downsampling (or upsampling) to reduce (or restore) resolution by factors of 2 multiple times.
 
-#### VitEncoder
+\subsubsection*{VitEncoder}
 
-- A **DownsampleStack** repeatedly halves the resolution using `Conv2d(stride=2)`. For example, if the `downscale_factor` is 2, it will be applied once; if 4, it may be applied twice, etc.
-- The resulting feature map is flattened to a shape of \((B,\, H \times W,\, C)\).
-- The flattened features are passed through several Transformer Blocks (self-attention).
-- The output is then reshaped back to \((B,\, C,\, H,\, W)\).
+\begin{itemize}
+  \item Implements a \textbf{DownsampleStack} that repeatedly halves the resolution using \texttt{Conv2d} with \texttt{stride=2}. For example, if \texttt{downscale\_factor} is 2, the convolution is applied once; if it is 4, it may be applied twice, etc.
+  \item The resulting feature map is flattened into a shape \((B,\, H \times W,\, C)\), where \(B\) is the batch size.
+  \item The flattened features are processed through several Transformer Blocks (self-attention).
+  \item Finally, the sequence is reshaped back to \((B,\, C,\, H,\, W)\).
+\end{itemize}
 
-#### VitDecoder
+\subsubsection*{VitDecoder}
 
-- This module takes features from the codebook (or a concatenation of multiple code levels).
-- A 1×1 convolution is applied to project the features to the base dimension `n_embd`.
-- The projected features are then processed through several Transformer Blocks.
-- An **UpsampleStack** with `ConvTranspose2d(stride=2)` is used to repeatedly upscale the features until the original resolution is reached.
+\begin{itemize}
+  \item Takes features from the codebook (or a concatenation of multiple code levels).
+  \item Applies a 1×1 convolution to project the features to the base dimension \texttt{n\_embd}.
+  \item Processes the projected features through several Transformer Blocks.
+  \item Uses an \textbf{UpsampleStack} with \texttt{ConvTranspose2d} (with \texttt{stride=2}) repeatedly to upscale the feature maps until the original resolution is reached.
+\end{itemize}
 
-### 3.3. Vector Quantization (VQ) and Codebook
+\subsection{Vector Quantization (VQ) and Codebook}
 
-The `Quantize` module uses a codebook
-
-$$
+The \texttt{Quantize} module uses a codebook 
+\[
 \mathbf{E} \in \mathbb{R}^{\text{codebook\_dim} \times \text{codebook\_size}}
-$$
+\]
+to quantize the feature maps. The main idea is as follows:
 
-to quantize the feature maps. The main steps are:
+\begin{enumerate}
+  \item \textbf{Projection:} \\
+    Project the input tensor of shape \((B,\, \text{in\_channels},\, H,\, W)\) to a tensor of shape \((B,\, \text{codebook\_dim},\, H,\, W)\).
+  \item \textbf{Flattening:} \\
+    Flatten each spatial location so that the tensor becomes a collection of vectors.
+  \item \textbf{Nearest Code Selection:} \\
+    Compute the squared Euclidean distance from each vector to every codebook entry and use \texttt{argmin} (or equivalently, \texttt{argmax} of the negative distance) to select the nearest code.
+  \item \textbf{Quantization:} \\
+    Replace each feature vector with its corresponding nearest codebook embedding.
+  \item \textbf{EMA Updates:} \\
+    Update the codebook entries using an Exponential Moving Average (EMA) to keep them stable (refer to Oord et al., \emph{Neural Discrete Representation Learning}).
+  \item \textbf{Commitment Loss:} \\
+    Enforce that the encoder output remains close to the discrete codes by computing the loss:
+    \[
+    L_{\text{commit}} = \Bigl\|\text{sg}\bigl[z_q\bigr] - z_e\Bigr\|^2,
+    \]
+    where \(\text{sg}(\cdot)\) is the stop-gradient operator, \(z_q\) is the quantized (nearest) code, and \(z_e\) is the continuous encoder output.
+\end{enumerate}
 
-1. **Projection:**  
-   Project the input of shape \((B,\, \text{in\_channels},\, H,\, W)\) to a new tensor of shape \((B,\, \text{codebook\_dim},\, H,\, W)\).
+\subsection{Hierarchical Approach}
 
-2. **Flattening:**  
-   Flatten each spatial location so that the tensor becomes a set of vectors.
+\begin{itemize}
+  \item The model is structured into multiple levels \(\ell = 0, 1, 2, \dots\), with each level compressing the image at a successively coarser scale.
+  \item The top-level code has the smallest spatial resolution (e.g., \(\frac{1}{8}\) or \(\frac{1}{16}\) of the original image).
+  \item During decoding, the top-level code is first decoded into a coarse representation. The next level then uses a combination of the corresponding encoder output at that level \textbf{plus} the upsampled coarse-level decoded output, followed by codebook quantization. This process is repeated until the finest scale is reached.
+\end{itemize}
 
-3. **Nearest Code Selection:**  
-   Compute the squared Euclidean distance from each vector to every codebook entry and use either argmin or (equivalently) argmax (of the negative distances) to select the nearest code.
+\subsection{Loss Function}
 
-4. **Quantization:**  
-   Replace each feature vector with its corresponding codebook embedding.
+\subsubsection*{Reconstruction Loss}
 
-5. **EMA Updates:**  
-   Update the codebook entries using Exponential Moving Average (EMA) to keep them stable (as described in Oord et al., "Neural Discrete Representation Learning").
+\[
+L_{\text{recon}} = \|\hat{x} - x\|^2,
+\]
+where \(x\) is the original image and \(\hat{x}\) is the final decoded (reconstructed) image.
 
-6. **Commitment Loss:**  
-   Enforce that the encoder output stays close to the discrete codes by applying the loss:
+\subsubsection*{VQ Commitment Loss}
 
-   $$
-   L_{\text{commit}} = \Bigl\|\text{sg}\bigl[z_q\bigr] - z_e\Bigr\|^2,
-   $$
+The commitment losses from all levels are summed:
+\[
+L_{\text{vq}} = \sum_{\ell} \Bigl\|\text{sg}\bigl[q_\ell\bigr] - e_\ell\Bigr\|^2.
+\]
 
-   where \(\text{sg}(\cdot)\) is the stop-gradient operator, \(z_q\) is the quantized (nearest) code, and \(z_e\) is the continuous encoder output.
+\subsubsection*{Total Loss}
 
-### 3.4. Hierarchical Approach
+\[
+L = L_{\text{recon}} + \beta\, L_{\text{vq}},
+\]
+where \(\beta\) is a hyperparameter (default value 0.25).
 
-- The model is organized into multiple levels \(\ell = 0, 1, 2, \dots\), where each level compresses the image at a successively coarser scale.
-- The top-level code has the smallest spatial resolution (e.g., \(\frac{1}{8}\) or \(\frac{1}{16}\) of the original).
-- During decoding, the top-level code is first decoded into a coarse representation. The next level then uses a combination of the corresponding encoder output from that level **plus** the upsampled coarse-level decoded output, followed by codebook quantization, and this process is repeated down to the finest scale.
+\subsection{Training Script (train.py)}
 
-### 3.5. Loss Function
+\begin{itemize}
+  \item \textbf{DistributedDataParallel (DDP):} \\
+    The training script uses DDP for multi-GPU scaling.
+  \item \textbf{Mixed Precision:} \\
+    Implemented with \texttt{autocast} (using \texttt{float16} or \texttt{bfloat16}) to improve training efficiency.
+  \item \textbf{WandB Logging:} \\
+    Used for logging training curves and saving reconstruction sample images.
+  \item \textbf{Checkpointing:} \\
+    The script saves the model’s \texttt{state\_dict}, optimizer state, and iteration count to facilitate resuming training.
+\end{itemize}
 
-- **Reconstruction Loss:**
+\section{Usage \& Utility}
 
-  $$
-  L_{\text{recon}} = \|\hat{x} - x\|^2,
-  $$
+\subsection{Converting PDB/CIF to Distograms}
 
-  where \( x \) is the original image and \(\hat{x}\) is the final decoded (reconstructed) image.
+\begin{enumerate}
+  \item Run \texttt{pdb\_to\_png\_distogram.py}.
+  \item Adjust input directories, output directories, and bin ranges as needed.
+  \item This will generate a large collection of \texttt{*.png} images in the \texttt{bin\_*_*} folders, along with corresponding \texttt{*.fasta} sequences.
+\end{enumerate}
 
-- **VQ Commitment Loss:**  
-  The commitment losses across all levels are summed as follows:
+\subsection{Training the Hierarchical VQ-VAE}
 
-  $$
-  L_{\text{vq}} = \sum_{\ell}\,\Bigl\|\text{sg}\bigl[q_\ell\bigr] - e_\ell\Bigr\|^2.
-  $$
+\begin{enumerate}
+  \item Adjust arguments in \texttt{train.py} (e.g., batch size, learning rate).
+  \item Specify the input path to the generated images (i.e., the parent folder containing multiple \texttt{bin\_*_*} subdirectories).
+  \item Run the training script:
+    \begin{center}
+      \texttt{python train.py --folder /path/to/images \ldots}
+    \end{center}
+  \item The script will stream data in a memory-efficient manner and train a multi-level VQ-VAE model to compress the 2D distograms.
+\end{enumerate}
 
-- **Total Loss:**
+\subsection{Applications}
 
-  $$
-  L = L_{\text{recon}} + \beta\, L_{\text{vq}},
-  $$
+\begin{itemize}
+  \item This pipeline is useful for analyzing and learning compressed representations of protein geometry.
+  \item The resulting discrete codes can be used in generative modeling or as latent embeddings for tasks such as protein classification or structure-based machine learning.
+\end{itemize}
 
-  where \(\beta\) is a hyperparameter (default value 0.25).
-
-### 3.6. Training Script (train.py)
-
-- **DistributedDataParallel (DDP):** Utilized for multi-GPU scaling.
-- **Mixed Precision:** Implemented with `autocast` (using float16 or bfloat16) to increase training efficiency.
-- **WandB Logging:** Used for logging training curves and reconstruction samples.
-- **Checkpointing:** Saves the model's `state_dict`, optimizer state, and iteration count to allow resuming training.
-
----
-
-## Usage & Utility
-
-### Converting PDB/CIF to Distograms
-
-1. Run `pdb_to_png_distogram.py`.
-2. Adjust input directories, output directories, and bin ranges as needed.
-3. This will produce a large collection of *.png images in `bin_*_*` folders along with corresponding *.fasta sequences.
-
-### Training the Hierarchical VQ-VAE
-
-1. Adjust the arguments in `train.py` (e.g., batch size, learning rate).
-2. Specify the input path to the generated images (the parent folder containing multiple `bin_*_*` subdirectories).
-3. Run the training script, for example:
+\end{document}
