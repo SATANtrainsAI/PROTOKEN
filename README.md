@@ -1,16 +1,15 @@
-Protein Structure Tokenization and Representation via Autoencoding Transformers:
+# Protein Structure Tokenization and Representation via Autoencoding Transformers:
 This repo intorduces a novel approach for protein structre backbone tokenization via VQVAE:
-# Repository Overview
 
 This repository contains two major parts:
 
 1. **Protein Structure to Image**  
-   A Python script (`pdb_to_png_distogram.py`) for parsing protein structures (files with extensions .pdb or .cif) and converting them into PNG “distogram” images (with accompanying FASTA files). These images capture backbone distances and angular features.
+   A Python script (`img_maker.py`) for parsing protein structures (files with extensions .pdb or .cif) and converting them into PNG “distogram” images (with accompanying FASTA files). These images capture backbone distances and angular features.
 
 2. **Hierarchical VQ-VAE Training**  
    A hierarchical VQ-VAE model implemented in PyTorch using Transformer blocks (files include `model.py`, `train.py`, and `dataloader.py`). This model learns quantized latent representations from the generated protein images.
 
-Below is an overview of the file structure and detailed explanations of the implementation and its underlying concepts.
+Below is an overview of the file structure and detailed explanations of the implementation and its underlying concepts. for more mathematical details, check out the `info.pdf` file.
 
 ---
 
@@ -26,7 +25,7 @@ Below is an overview of the file structure and detailed explanations of the impl
 - **Normalization and Merging:** Normalizes the computed distances and angles, and merges them into a three-channel (RGB) image where each pixel corresponds to the geometric relationship between two residues.
 - **Output:** Saves the image as a PNG file and writes out a FASTA file containing the protein sequence.
 - **Binning:** Organizes images into directories based on the number of residues (for example, files with 40 to 64 residues, 65 to 128 residues, etc.) to maintain manageable image sizes.
-- **Parallel Processing:** Uses Python’s multiprocessing capabilities to process files concurrently and deletes the original structure files after successful conversion.
+- **Parallel Processing:** Uses Python’s multiprocessing to process files in parallel and deletes the original structure files after successful conversion.
 
 ### Key Sections
 
@@ -165,18 +164,3 @@ Below is an overview of the file structure and detailed explanations of the impl
 - Training progress, including loss curves and sample reconstructions, are logged using WandB.
 - Checkpointing is implemented to save the model’s state, optimizer state, and the iteration count for resuming training.
 
----
-
-## Usage & Utility
-
-### Converting PDB/CIF to Distograms
-
-1. Run the script `pdb_to_png_distogram.py`.
-2. Adjust the input directories, output directories, and bin ranges as necessary.
-3. The conversion process will produce a large collection of PNG images in directories named by residue count (e.g., `bin_40_64/`, `bin_65_128/`) along with corresponding FASTA files containing the protein sequences.
-
-### Training the Hierarchical VQ-VAE
-
-1. Modify the arguments in `train.py` (such as the batch size and learning rate) as required.
-2. Specify the input path to the folder containing the generated PNG images (organized in subdirectories according to bin ranges).
-3. Run the training script with a command similar to:
